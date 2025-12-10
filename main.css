@@ -247,6 +247,13 @@ main {
   flex-direction: column;
 }
 
+/* Always show advanced options and keep them at the bottom of the left-panel card */
+.adv-card { display: block; }
+.adv-card .adv-content { display: block; }
+
+/* Push advanced options to the bottom of the controls card (which is a flex column) */
+.panel-left .card .adv-card { margin-top: auto; }
+
 
 .panel-right .canvas-wrap {
   flex: 1;
@@ -321,7 +328,7 @@ h2#title, h2 {
 
 /* sliders */
 .scroll-bar { display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:12px; margin: 10px 0; }
-#scaleRange, #zoomRange {
+#zoomRange {
   width: 350px; max-width: 100%;
   accent-color: var(--brand);
   background: #222;
@@ -521,11 +528,13 @@ h2#title, h2 {
 .canvas-viewport > #canvas { width: 100%; }
 
 .canvas-viewport{
-  width: min(92%, 980px);
-  height: clamp(240px, 56vh, 340px);
+  width: min(100%, 980px);
+  /* make the viewport a square based on its width */
+  aspect-ratio: 1 / 1;
+  height: auto; /* height driven by width via aspect-ratio */
   margin: 0 auto;
   overflow: auto;
-  padding: 8px;
+  padding: 0px;
   border: 2px dotted rgba(255,255,255,.18);
   border-radius: 12px;
   background: rgba(0,0,0,.12);
@@ -616,7 +625,17 @@ h2#title, h2 {
 
   /* === Controls (left column) === */
   .scroll-bar { gap: 8px; }
-  #scaleRange, #zoomRange { width: 100%; }
+  #zoomRange { width: 100%; }
+  #scaleRange { 
+    min-width: 80px;
+    height: 38px;
+    font-size: 1rem;
+    text-align: center;
+    border: 2px solid #007bff;
+    border-radius: 6px;
+    padding: 4px 6px;
+    box-sizing: border-box;
+  }
 
   .dimensions {
     display: grid;
@@ -653,7 +672,9 @@ h2#title, h2 {
   .canvas-wrap { gap: 12px; }
   .canvas-viewport{
     width: 100%;
-    height: clamp(260px, 50vh, 62vh);
+    /* mobile: keep square using width */
+    aspect-ratio: 1 / 1;
+    height: auto;
     padding: 6px;
   }
   .canvas-viewport > #canvas{
@@ -703,6 +724,29 @@ h2#title, h2 {
     grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   }
   .brand-name{ font-size: .95rem; }
+}
+
+/* --- Style selects like primary buttons --- */
+#ditherAlgorithm, #colorMatching, .algorithm-select {
+  background: var(--btn-primary) !important;
+  color: #fff !important;
+  border: 1px solid var(--btn-primary) !important;
+  padding: 6px 12px !important;
+  border-radius: 10px !important;
+  font-size: 14px !important;
+  cursor: pointer !important;
+  min-width: 140px !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12) !important;
+}
+
+#ditherAlgorithm:hover, #colorMatching:hover, .algorithm-select:hover {
+  background: var(--btn-primary-hover) !important;
+  border-color: var(--btn-primary-hover) !important;
+}
+
+#ditherAlgorithm:focus, #colorMatching:focus, .algorithm-select:focus {
+  outline: none !important;
+  box-shadow: 0 0 0 4px rgba(0,123,255,0.12) !important;
 }
 
 /* Sticky header spacing: keep content from hiding underneath */
@@ -821,27 +865,13 @@ h2#title, h2 {
   background: linear-gradient(160deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
   box-shadow: var(--shadow);
 }
-.adv-card > summary {
-  list-style: none;
-  cursor: pointer;
+.adv-card .adv-header {
   padding: 10px 14px;
   font-weight: 700;
   font-size: 1.1rem;
   border-radius: 12px;
   display: flex; align-items: center; gap: 10px;
-  outline: none;
 }
-.adv-card > summary::-webkit-details-marker { display: none; }
-.adv-card > summary::after {
-  content: "";
-  margin-left: auto;
-  width: 10px; height: 10px;
-  border-right: 2px solid var(--text);
-  border-bottom: 2px solid var(--text);
-  transform: rotate(45deg);
-  opacity: .8;
-}
-.adv-card[open] > summary::after { transform: rotate(225deg); }
 
 .adv-card .adv-content {
   padding: 10px 14px 14px 14px;
@@ -1234,7 +1264,8 @@ body.hide-ui-off .btn-eye { display: none !important; }
 
   /* Remove any leftover fixed widths that cause overflow */
   .scroll-bar { gap: 8px !important; flex-wrap: nowrap; }
-  #scaleRange, #zoomRange { width: 100% !important; }
+  #zoomRange { width: 100% !important; }
+  #scaleRange { width: 80px !important; }
 
   /* Inputs stretch nicely */
   .dimensions {
@@ -1247,6 +1278,13 @@ body.hide-ui-off .btn-eye { display: none !important; }
     width: 100% !important;
     min-width: 0 !important;
   }
+  #scaleRange {
+  height: 36px;          /* or whatever height you want */
+  padding: 4px 8px;      /* consistent padding */
+  font-size: 16px;       /* consistent font size */
+  line-height: 1.2;
+  box-sizing: border-box; /* include padding/border in height */
+}
 
   /* Buttons full width, stack with nice spacing */
   .button, .btn { 
@@ -1261,8 +1299,10 @@ body.hide-ui-off .btn-eye { display: none !important; }
   .canvas-viewport{
     width: 100% !important;
     max-width: 100% !important;
-    height: clamp(260px, 50vh, 62vh) !important;
-    padding: 6px !important;
+    /* enforce square even in constrained containers */
+    aspect-ratio: 1 / 1 !important;
+    height: auto !important;
+    padding: 0px !important;
     overflow: auto !important;
   }
   .canvas-viewport > #canvas{

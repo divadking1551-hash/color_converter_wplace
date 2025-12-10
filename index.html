@@ -110,10 +110,14 @@
 
       <div class="card">
         <div class="scroll-bar">
+          
           <label for="scaleRange">Scale</label>
-          <input type="range" id="scaleRange" min="0.001" max="5" step="any" value="1">
+          <div class="dimension-input">
+          <input type="number" id="scaleRange" min="0.001" max="5" step="0.01" value="1" style="width: 80px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+          </div>
           <span id="scaleValue">1.00x</span>
         </div>
+        <div style="margin: 20px 0 1px 0;"></div>
 
         <div class="dimensions">
           <div class="dimension-input">
@@ -129,16 +133,79 @@
             <input type="number" id="area" readonly>
           </div>
         </div>
-        <div style="display:flex; justify-content:center; align-items:center;margin: 20px 0 10px 0; flex-wrap:wrap; width:100%;">
-        <button id="ditherButton" class="btn btn-toggle active">
-          Dithering (Recommended)
-        </button> 
-      </div>
-      <!-- Advanced options -->
-      <details id="adv-options" class="adv-card">
-        <summary>
+        <div style="display:flex; flex-direction:column; justify-content:center; align-items:center;margin: 20px 0 10px 0; width:100%; gap: 10px;">
+  <button id="ditherButton" class="btn btn-toggle active">
+    Dithering (Recommended)
+  </button>
+  
+  <!-- NEW: Dithering Algorithm Selector -->
+  <div class="dither-algorithm-selector" id="ditherAlgorithmWrapper" style="display: flex; align-items: center; gap: 8px;">
+    <label for="ditherAlgorithm" style="font-size: 14px; color: #666; white-space: nowrap;">
+      Algorithm:
+    </label>
+    <select id="ditherAlgorithm" class="algorithm-select" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: white; font-size: 14px; cursor: pointer; min-width: 180px;">
+      <option value="floyd-steinberg">Floyd-Steinberg</option>
+      <option value="atkinson">Atkinson (Pixel Art)</option>
+      <option value="sierra">Sierra (Soft)</option>
+      <option value="jarvis">Jarvis (Smooth)</option>
+      <option value="stucki">Stucki (Photo)</option>
+      <option value="bayer">Bayer (Pattern)</option>
+    </select>
+  </div>
+</div>
+
+<!-- NEW: Color Matching Selector -->
+<div style="display:flex; justify-content:center; align-items:center; margin: 10px 0; flex-wrap:wrap; width:100%; gap: 10px;">
+  <label for="colorMatching" style="font-size: 14px; color: #666; white-space: nowrap;">
+    Color Matching:
+  </label>
+  <select id="colorMatching" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: white; font-size: 14px; cursor: pointer; min-width: 200px;">
+    <option value="standard">Standard (Fast)</option>
+    <option value="lab">Perceptual (Accurate)</option>
+    <option value="vibrant">Vibrant (More Colorful)</option>
+  </select>
+</div>
+
+<style>
+/* Show/hide selector based on dithering button state */
+#ditherButton:not(.active) ~ .dither-algorithm-selector {
+  display: none !important;
+}
+
+.algorithm-select:hover {
+  border-color: #999;
+}
+
+.algorithm-select:focus {
+  outline: none;
+  border-color: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+</style>
+
+<script>
+// Update selector visibility when dithering button is toggled
+(function() {
+  const btn = document.getElementById('ditherButton');
+  const wrapper = document.getElementById('ditherAlgorithmWrapper');
+  
+  if (btn && wrapper) {
+    // Initial state
+    wrapper.style.display = btn.classList.contains('active') ? 'flex' : 'none';
+    
+    // Watch for changes (use MutationObserver since the button's click handler is elsewhere)
+    const observer = new MutationObserver(() => {
+      wrapper.style.display = btn.classList.contains('active') ? 'flex' : 'none';
+    });
+    observer.observe(btn, { attributes: true, attributeFilter: ['class'] });
+  }
+})();
+</script>
+      <!-- Advanced options (always visible) -->
+      <div id="adv-options" class="adv-card">
+        <div class="adv-header">
           <span>Advanced options</span>
-        </summary>
+        </div>
 
         <div class="adv-content">
           <!-- Hide semi-transparent pixels (toggle button) -->
@@ -157,7 +224,7 @@
             Show color‑hiding controls (eyes)
           </button>
         </div>
-      </details>
+      </div>
       </div>
     </section>
 

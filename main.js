@@ -15,6 +15,10 @@
   [51,57,65],[109,117,141],[179,185,209]
 */
 
+let currentScale = 1.0;
+let currentDithering = 'None';
+let currentColorAlgorithm = 'standard';
+
 // One canonical source of truth for all colors, in UI order:
 const MASTER_PALETTE = [
   // free
@@ -301,14 +305,11 @@ document.addEventListener('paste', function (event) {
   }
 });
 
-// Function to find the closest color in the pattern
-function corMaisProxima(r, g, b) {
+function corMaisProximaStandard(r, g, b) {
   let menorDist = Infinity;
   let cor = [0, 0, 0];
   for (let i = 0; i < padrao.length; i++) {
     const [pr, pg, pb] = padrao[i];
-    //const dist = Math.sqrt((pr - r) ** 2 + (pg - g) ** 2 + (pb - b) ** 2);
-    //https://www.compuphase.com/cmetric.htm#:~:text=A%20low%2Dcost%20approximation
     const rmean = (pr + r) / 2;
     const rdiff = pr - r;
     const gdiff = pg - g;
@@ -324,6 +325,127 @@ function corMaisProxima(r, g, b) {
   }
   return cor;
 }
+
+// Perceptual color matching (LAB color space)
+function corMaisProximaLAB(r, g, b) {
+  function rgbToLab(r, g, b) {
+    r = r / 255; g = g / 255; b = b / 255;
+    r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+    g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+    b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+
+    let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100;
+    let y = (r * 0.2126 + g * 0.7152 + b * 0.0722) * 100;
+    let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) * 100;
+
+    x = x / 95.047; y = y / 100.000; z = z / 108.883;
+    x = x > 0.008856 ? Math.pow(x, 1/3) : (7.787 * x) + 16/116;
+    y = y > 0.008856 ? Math.pow(y, 1/3) : (7.787 * y) + 16/116;
+    z = z > 0.008856 ? Math.pow(z, 1/3) : (7.787 * z) + 16/116;
+
+    return [(116 * y) - 16, 500 * (x - y), 200 * (y - z)];
+  }
+
+  const [L1, a1, b1] = rgbToLab(r, g, b);
+  let menorDist = Infinity;
+  let cor = [0, 0, 0];
+
+  for (let i = 0; i < padrao.length; i++) {
+    const [pr, pg, pb] = padrao[i];
+    const [L2, a2, b2] = rgbToLab(pr, pg, pb);
+    
+    const dist = Math.sqrt(
+      Math.pow(L2 - L1, 2) +
+      Math.pow(a2 - a1, 2) +
+      Math.pow(b2 - b1, 2)
+    );
+
+    if (dist < menorDist) {
+      menorDist = dist;
+      cor = [pr, pg, pb];
+    }
+  }
+  return cor;
+}
+
+// Vibrant - prefers saturated colors
+function corMaisProximaVibrant(r, g, b) {
+  function rgbToLab(r, g, b) {
+    r = r / 255; g = g / 255; b = b / 255;
+    r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+    g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+    b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+
+    let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) * 100;
+    let y = (r * 0.2126 + g * 0.7152 + b * 0.0722) * 100;
+    let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) * 100;
+
+    x = x / 95.047; y = y / 100.000; z = z / 108.883;
+    x = x > 0.008856 ? Math.pow(x, 1/3) : (7.787 * x) + 16/116;
+    y = y > 0.008856 ? Math.pow(y, 1/3) : (7.787 * y) + 16/116;
+    z = z > 0.008856 ? Math.pow(z, 1/3) : (7.787 * z) + 16/116;
+
+    return [(116 * y) - 16, 500 * (x - y), 200 * (y - z)];
+  }
+
+  function getSaturation(r, g, b) {
+    const max = Math.max(r, g, b) / 255;
+    const min = Math.min(r, g, b) / 255;
+    const l = (max + min) / 2;
+    if (max === min) return 0;
+    return l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
+  }
+
+  const [L1, a1, b1] = rgbToLab(r, g, b);
+  const inputSat = getSaturation(r, g, b);
+  
+  let bestColor = [0, 0, 0];
+  let bestScore = Infinity;
+
+  for (let i = 0; i < padrao.length; i++) {
+    const [pr, pg, pb] = padrao[i];
+    const [L2, a2, b2] = rgbToLab(pr, pg, pb);
+    
+    const colorDist = Math.sqrt(
+      Math.pow(L2 - L1, 2) +
+      Math.pow(a2 - a1, 2) +
+      Math.pow(b2 - b1, 2)
+    );
+
+    const paletteSat = getSaturation(pr, pg, pb);
+    const satBonus = inputSat > 0.3 ? (1 - paletteSat) * 5 : 0;
+    
+    const score = colorDist + satBonus;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestColor = [pr, pg, pb];
+    }
+  }
+  return bestColor;
+}
+
+
+// ========================================
+// COLOR MATCHING SELECTOR SETUP
+// ========================================
+
+// Initialize with standard method
+let corMaisProxima = corMaisProximaStandard;
+
+// Load saved preference and apply it immediately
+(function initColorMatchingImmediate() {
+  const methods = {
+    standard: corMaisProximaStandard,
+    lab: corMaisProximaLAB,
+    vibrant: corMaisProximaVibrant
+  };
+
+  const saved = localStorage.getItem('colorMatching') || 'standard';
+  corMaisProxima = methods[saved];
+  window.corMaisProxima = corMaisProxima;
+})();
+
 
 function hardClampToPalette(c, palette) {
   if (!c) return;
@@ -399,77 +521,72 @@ let fileName = "";
   });
 })();
 
-// Dithering helper function
-function clampByte(v){ return v < 0 ? 0 : v > 255 ? 255 : v; }
+// ========================================
+// MULTIPLE DITHERING ALGORITHMS
+// ========================================
+// Replace the existing processWithFloydSteinberg function and dithering logic
+// with this enhanced version that supports multiple algorithms
+
+// Utility: clamp to byte range
+function clampByte(v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+// ========================================
+// DITHERING ALGORITHMS
+// ========================================
 
 function processWithFloydSteinberg(ctx, palette, transparentHideActive) {
   const w = canvas.width, h = canvas.height;
   const img = ctx.getImageData(0, 0, w, h);
-  const d  = img.data;
-
-  // float buffer to carry diffusion error
+  const d = img.data;
   const buf = new Float32Array(d.length);
   for (let i = 0; i < d.length; i++) buf[i] = d[i];
-
   const colorCounts = {};
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const idx = (y * w + x) * 4;
-
       let r = buf[idx], g = buf[idx+1], b = buf[idx+2], a = buf[idx+3];
 
-      // Handle semi‑transparent input pixels
       if (a < 255 && a > 0) {
         if (transparentHideActive) {
-          // hide and skip diffusion
           d[idx] = d[idx+1] = d[idx+2] = 0;
           d[idx+3] = 0;
           continue;
         } else {
-          a = 255; // treat as opaque for processing
+          a = 255;
         }
       }
 
-      // Quantize to nearest palette color
       const [nr, ng, nb] = corMaisProxima(r|0, g|0, b|0);
       const key = `${nr},${ng},${nb}`;
 
-      // --- Per‑color hide: make transparent and skip diffusion/count ---
       if (typeof hiddenColors !== 'undefined' && hiddenColors.has(key)) {
         d[idx] = d[idx+1] = d[idx+2] = 0;
         d[idx+3] = 0;
-        continue; // do NOT diffuse error from hidden pixels
+        continue;
       }
 
-      // Write quantized color
-      d[idx]   = nr;
-      d[idx+1] = ng;
-      d[idx+2] = nb;
+      d[idx] = nr; d[idx+1] = ng; d[idx+2] = nb;
       d[idx+3] = (a === 0) ? 0 : 255;
 
-      // Count only visible pixels
       if (d[idx+3] !== 0) {
         colorCounts[key] = (colorCounts[key] || 0) + 1;
       }
 
-      // Error terms
-      const er = r - nr;
-      const eg = g - ng;
-      const eb = b - nb;
+      const er = r - nr, eg = g - ng, eb = b - nb;
 
-      // Diffuse error to neighbors (Floyd–Steinberg)
       const push = (xx, yy, fr) => {
         if (xx < 0 || xx >= w || yy < 0 || yy >= h) return;
         const j = (yy * w + xx) * 4;
-        buf[j  ] = clampByte(buf[j  ] + er * fr);
+        buf[j] = clampByte(buf[j] + er * fr);
         buf[j+1] = clampByte(buf[j+1] + eg * fr);
         buf[j+2] = clampByte(buf[j+2] + eb * fr);
       };
 
-      push(x+1, y  , 7/16);
+      // Floyd-Steinberg diffusion pattern
+      push(x+1, y, 7/16);
       push(x-1, y+1, 3/16);
-      push(x  , y+1, 5/16);
+      push(x, y+1, 5/16);
       push(x+1, y+1, 1/16);
     }
   }
@@ -477,6 +594,468 @@ function processWithFloydSteinberg(ctx, palette, transparentHideActive) {
   ctx.putImageData(img, 0, 0);
   return colorCounts;
 }
+
+function processWithAtkinson(ctx, palette, transparentHideActive) {
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const buf = new Float32Array(d.length);
+  for (let i = 0; i < d.length; i++) buf[i] = d[i];
+  const colorCounts = {};
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      let r = buf[idx], g = buf[idx+1], b = buf[idx+2], a = buf[idx+3];
+
+      if (a < 255 && a > 0) {
+        if (transparentHideActive) {
+          d[idx] = d[idx+1] = d[idx+2] = 0;
+          d[idx+3] = 0;
+          continue;
+        } else {
+          a = 255;
+        }
+      }
+
+      const [nr, ng, nb] = corMaisProxima(r|0, g|0, b|0);
+      const key = `${nr},${ng},${nb}`;
+
+      if (typeof hiddenColors !== 'undefined' && hiddenColors.has(key)) {
+        d[idx] = d[idx+1] = d[idx+2] = 0;
+        d[idx+3] = 0;
+        continue;
+      }
+
+      d[idx] = nr; d[idx+1] = ng; d[idx+2] = nb;
+      d[idx+3] = (a === 0) ? 0 : 255;
+
+      if (d[idx+3] !== 0) {
+        colorCounts[key] = (colorCounts[key] || 0) + 1;
+      }
+
+      const er = r - nr, eg = g - ng, eb = b - nb;
+
+      const push = (xx, yy, fr) => {
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) return;
+        const j = (yy * w + xx) * 4;
+        buf[j] = clampByte(buf[j] + er * fr);
+        buf[j+1] = clampByte(buf[j+1] + eg * fr);
+        buf[j+2] = clampByte(buf[j+2] + eb * fr);
+      };
+
+      // Atkinson diffusion (only 75% of error, creating lighter effect)
+      const frac = 1/8;
+      push(x+1, y, frac);
+      push(x+2, y, frac);
+      push(x-1, y+1, frac);
+      push(x, y+1, frac);
+      push(x+1, y+1, frac);
+      push(x, y+2, frac);
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  return colorCounts;
+}
+
+function processWithJarvis(ctx, palette, transparentHideActive) {
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const buf = new Float32Array(d.length);
+  for (let i = 0; i < d.length; i++) buf[i] = d[i];
+  const colorCounts = {};
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      let r = buf[idx], g = buf[idx+1], b = buf[idx+2], a = buf[idx+3];
+
+      if (a < 255 && a > 0) {
+        if (transparentHideActive) {
+          d[idx] = d[idx+1] = d[idx+2] = 0;
+          d[idx+3] = 0;
+          continue;
+        } else {
+          a = 255;
+        }
+      }
+
+      const [nr, ng, nb] = corMaisProxima(r|0, g|0, b|0);
+      const key = `${nr},${ng},${nb}`;
+
+      if (typeof hiddenColors !== 'undefined' && hiddenColors.has(key)) {
+        d[idx] = d[idx+1] = d[idx+2] = 0;
+        d[idx+3] = 0;
+        continue;
+      }
+
+      d[idx] = nr; d[idx+1] = ng; d[idx+2] = nb;
+      d[idx+3] = (a === 0) ? 0 : 255;
+
+      if (d[idx+3] !== 0) {
+        colorCounts[key] = (colorCounts[key] || 0) + 1;
+      }
+
+      const er = r - nr, eg = g - ng, eb = b - nb;
+
+      const push = (xx, yy, fr) => {
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) return;
+        const j = (yy * w + xx) * 4;
+        buf[j] = clampByte(buf[j] + er * fr);
+        buf[j+1] = clampByte(buf[j+1] + eg * fr);
+        buf[j+2] = clampByte(buf[j+2] + eb * fr);
+      };
+
+      // Jarvis-Judice-Ninke diffusion (12 neighbors, smoother)
+      push(x+1, y, 7/48);
+      push(x+2, y, 5/48);
+      push(x-2, y+1, 3/48);
+      push(x-1, y+1, 5/48);
+      push(x, y+1, 7/48);
+      push(x+1, y+1, 5/48);
+      push(x+2, y+1, 3/48);
+      push(x-2, y+2, 1/48);
+      push(x-1, y+2, 3/48);
+      push(x, y+2, 5/48);
+      push(x+1, y+2, 3/48);
+      push(x+2, y+2, 1/48);
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  return colorCounts;
+}
+
+function processWithSierra(ctx, palette, transparentHideActive) {
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const buf = new Float32Array(d.length);
+  for (let i = 0; i < d.length; i++) buf[i] = d[i];
+  const colorCounts = {};
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      let r = buf[idx], g = buf[idx+1], b = buf[idx+2], a = buf[idx+3];
+
+      if (a < 255 && a > 0) {
+        if (transparentHideActive) {
+          d[idx] = d[idx+1] = d[idx+2] = 0;
+          d[idx+3] = 0;
+          continue;
+        } else {
+          a = 255;
+        }
+      }
+
+      const [nr, ng, nb] = corMaisProxima(r|0, g|0, b|0);
+      const key = `${nr},${ng},${nb}`;
+
+      if (typeof hiddenColors !== 'undefined' && hiddenColors.has(key)) {
+        d[idx] = d[idx+1] = d[idx+2] = 0;
+        d[idx+3] = 0;
+        continue;
+      }
+
+      d[idx] = nr; d[idx+1] = ng; d[idx+2] = nb;
+      d[idx+3] = (a === 0) ? 0 : 255;
+
+      if (d[idx+3] !== 0) {
+        colorCounts[key] = (colorCounts[key] || 0) + 1;
+      }
+
+      const er = r - nr, eg = g - ng, eb = b - nb;
+
+      const push = (xx, yy, fr) => {
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) return;
+        const j = (yy * w + xx) * 4;
+        buf[j] = clampByte(buf[j] + er * fr);
+        buf[j+1] = clampByte(buf[j+1] + eg * fr);
+        buf[j+2] = clampByte(buf[j+2] + eb * fr);
+      };
+
+      // Sierra diffusion (softer than Floyd-Steinberg)
+      push(x+1, y, 5/32);
+      push(x+2, y, 3/32);
+      push(x-2, y+1, 2/32);
+      push(x-1, y+1, 4/32);
+      push(x, y+1, 5/32);
+      push(x+1, y+1, 4/32);
+      push(x+2, y+1, 2/32);
+      push(x-1, y+2, 2/32);
+      push(x, y+2, 3/32);
+      push(x+1, y+2, 2/32);
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  return colorCounts;
+}
+
+function processWithStucki(ctx, palette, transparentHideActive) {
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const buf = new Float32Array(d.length);
+  for (let i = 0; i < d.length; i++) buf[i] = d[i];
+  const colorCounts = {};
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      let r = buf[idx], g = buf[idx+1], b = buf[idx+2], a = buf[idx+3];
+
+      if (a < 255 && a > 0) {
+        if (transparentHideActive) {
+          d[idx] = d[idx+1] = d[idx+2] = 0;
+          d[idx+3] = 0;
+          continue;
+        } else {
+          a = 255;
+        }
+      }
+
+      const [nr, ng, nb] = corMaisProxima(r|0, g|0, b|0);
+      const key = `${nr},${ng},${nb}`;
+
+      if (typeof hiddenColors !== 'undefined' && hiddenColors.has(key)) {
+        d[idx] = d[idx+1] = d[idx+2] = 0;
+        d[idx+3] = 0;
+        continue;
+      }
+
+      d[idx] = nr; d[idx+1] = ng; d[idx+2] = nb;
+      d[idx+3] = (a === 0) ? 0 : 255;
+
+      if (d[idx+3] !== 0) {
+        colorCounts[key] = (colorCounts[key] || 0) + 1;
+      }
+
+      const er = r - nr, eg = g - ng, eb = b - nb;
+
+      const push = (xx, yy, fr) => {
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) return;
+        const j = (yy * w + xx) * 4;
+        buf[j] = clampByte(buf[j] + er * fr);
+        buf[j+1] = clampByte(buf[j+1] + eg * fr);
+        buf[j+2] = clampByte(buf[j+2] + eb * fr);
+      };
+
+      // Stucki diffusion (similar to Jarvis, slightly different weights)
+      push(x+1, y, 8/42);
+      push(x+2, y, 4/42);
+      push(x-2, y+1, 2/42);
+      push(x-1, y+1, 4/42);
+      push(x, y+1, 8/42);
+      push(x+1, y+1, 4/42);
+      push(x+2, y+1, 2/42);
+      push(x-2, y+2, 1/42);
+      push(x-1, y+2, 2/42);
+      push(x, y+2, 4/42);
+      push(x+1, y+2, 2/42);
+      push(x+2, y+2, 1/42);
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  return colorCounts;
+}
+
+function processWithBayer(ctx, palette, transparentHideActive) {
+  // 4x4 Bayer matrix (normalized to 0-1)
+  const bayerMatrix = [
+    [0/16, 8/16, 2/16, 10/16],
+    [12/16, 4/16, 14/16, 6/16],
+    [3/16, 11/16, 1/16, 9/16],
+    [15/16, 7/16, 13/16, 5/16]
+  ];
+
+  const w = canvas.width, h = canvas.height;
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const colorCounts = {};
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      let r = d[idx], g = d[idx+1], b = d[idx+2], a = d[idx+3];
+
+      if (a < 255 && a > 0) {
+        if (transparentHideActive) {
+          d[idx] = d[idx+1] = d[idx+2] = 0;
+          d[idx+3] = 0;
+          continue;
+        } else {
+          a = 255;
+        }
+      }
+
+      // Apply Bayer threshold
+      const threshold = bayerMatrix[y % 4][x % 4];
+      const adjustedR = clampByte(r + (threshold - 0.5) * 64);
+      const adjustedG = clampByte(g + (threshold - 0.5) * 64);
+      const adjustedB = clampByte(b + (threshold - 0.5) * 64);
+
+      const [nr, ng, nb] = corMaisProxima(adjustedR, adjustedG, adjustedB);
+      const key = `${nr},${ng},${nb}`;
+
+      if (typeof hiddenColors !== 'undefined' && hiddenColors.has(key)) {
+        d[idx] = d[idx+1] = d[idx+2] = 0;
+        d[idx+3] = 0;
+        continue;
+      }
+
+      d[idx] = nr; d[idx+1] = ng; d[idx+2] = nb;
+      d[idx+3] = (a === 0) ? 0 : 255;
+
+      if (d[idx+3] !== 0) {
+        colorCounts[key] = (colorCounts[key] || 0) + 1;
+      }
+    }
+  }
+
+  ctx.putImageData(img, 0, 0);
+  return colorCounts;
+}
+
+// ========================================
+// DITHERING ALGORITHM SELECTOR
+// ========================================
+
+const DITHER_ALGORITHM_KEY = 'ditherAlgorithm';
+
+function getDitheringAlgorithm() {
+  const saved = localStorage.getItem(DITHER_ALGORITHM_KEY);
+  return saved || 'floyd-steinberg';
+}
+
+function setDitheringAlgorithm(algorithm) {
+  localStorage.setItem(DITHER_ALGORITHM_KEY, algorithm);
+}
+
+// ========================================
+// REPLACE processarImagem function
+// ========================================
+// Find the section in your code that handles dithering and replace it with this:
+
+function processarImagem() {
+  if (!canvas || !ctx) return;
+
+
+  const transparentHideActive =
+    document.getElementById('transparentButton').classList.contains('active');
+
+  let colorCounts;
+
+  if (isDitheringOn && isDitheringOn()) {
+    // Get selected algorithm
+    const algorithm = getDitheringAlgorithm();
+    
+    // Choose the appropriate dithering function
+    switch(algorithm) {
+      case 'atkinson':
+        colorCounts = processWithAtkinson(ctx, padrao, transparentHideActive);
+        break;
+      case 'jarvis':
+        colorCounts = processWithJarvis(ctx, padrao, transparentHideActive);
+        break;
+      case 'sierra':
+        colorCounts = processWithSierra(ctx, padrao, transparentHideActive);
+        break;
+      case 'stucki':
+        colorCounts = processWithStucki(ctx, padrao, transparentHideActive);
+        break;
+      case 'bayer':
+        colorCounts = processWithBayer(ctx, padrao, transparentHideActive);
+        break;
+      case 'floyd-steinberg':
+      default:
+        colorCounts = processWithFloydSteinberg(ctx, padrao, transparentHideActive);
+        break;
+    }
+  } else {
+    // NON-DITHERED PATH (unchanged)
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imgData.data;
+    colorCounts = {};
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+
+      const [nr, ng, nb] = corMaisProxima(r, g, b);
+      const key = `${nr},${ng},${nb}`;
+
+      if (hiddenColors.has(key)) {
+        data[i] = data[i + 1] = data[i + 2] = 0;
+        data[i + 3] = 0;
+        continue;
+      }
+
+      data[i] = nr; data[i + 1] = ng; data[i + 2] = nb;
+
+      if (a === 0) {
+        data[i + 3] = 0;
+      } else if (a < 255) {
+        data[i + 3] = transparentHideActive ? 0 : 255;
+      } else {
+        data[i + 3] = 255;
+      }
+
+      if (data[i + 3] !== 0) {
+        colorCounts[key] = (colorCounts[key] || 0) + 1;
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  // Keep processedCanvas/UI in sync
+  processedCanvas = document.createElement('canvas');
+  processedCtx = processedCanvas.getContext('2d', { willReadFrequently: true });
+  processedCanvas.width = canvas.width;
+  processedCanvas.height = canvas.height;
+  processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
+  processedCtx.drawImage(canvas, 0, 0);
+
+  const exportCanvas = finalizeToPalette();
+  downloadLink.href = exportCanvas.toDataURL('image/png');
+
+  const base = (fileName || 'image').replace(/\.[^.]+$/, '').trim() || 'image';
+  
+  // Compute filename parts by sampling current UI settings at export time
+  //  - scale: read from `scaleRange` if present, fallback to `currentScale`
+  //  - dithering: check whether dithering is enabled, then read the selected algorithm
+  //  - color algorithm: read from `colorMatching` select or fallback
+  const scaleEl = document.getElementById('scaleRange');
+  const scaleNum = (scaleEl && parseFloat(scaleEl.value)) ? parseFloat(scaleEl.value) : (typeof currentScale === 'number' ? currentScale : parseFloat(String(currentScale)) || 1);
+  const scaleStr = `scale${scaleNum.toFixed(2)}x`;
+
+  const ditherOn = (typeof isDitheringOn === 'function') ? isDitheringOn() : (localStorage.getItem('ditherOn') === 'true');
+  const ditherAlgEl = document.getElementById('ditherAlgorithm');
+  const ditheringName = ditherOn ? (ditherAlgEl?.value || (typeof getDitheringAlgorithm === 'function' ? getDitheringAlgorithm() : currentDithering)) : 'None';
+
+  const colorSelectEl = document.getElementById('colorMatching');
+  const colorAlg = colorSelectEl?.value || currentColorAlgorithm || localStorage.getItem('colorMatching') || 'standard';
+
+  // Build filename parts and set download name
+  const extraParts = [scaleStr, ditheringName, colorAlg].filter(Boolean).join('_');
+  downloadLink.download = `converted_${base}_${extraParts}.png`;
+
+  showImageInfo(canvas.width, canvas.height);
+  if (colorCounts) showColorUsage(colorCounts, getColorsListOrder());
+
+  _colorCounts = colorCounts;
+
+  return colorCounts;
+}
+
+// ========================================
+// UI INITIALIZATION
+// ========================================
+// Add this to initialize the dropdown selector
 
 
 //Zoom helper
@@ -495,80 +1074,6 @@ function getColorsListOrder() {
 
 // Image processing
 let _colorCounts
-
-function processarImagem() {
-  if (!canvas || !ctx) return;
-
-  const transparentHideActive =
-    document.getElementById('transparentButton').classList.contains('active');
-
-  let colorCounts;
-
-  if (isDitheringOn && isDitheringOn()) {
-    // ---- DITHERED PATH ----
-    colorCounts = processWithFloydSteinberg(ctx, padrao, transparentHideActive);
-  } else {
-    // ---- NON-DITHERED PATH ----
-    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imgData.data;
-    colorCounts = {};
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
-
-      const [nr, ng, nb] = corMaisProxima(r, g, b);
-      const key = `${nr},${ng},${nb}`;
-
-      // Per-color HIDE
-      if (hiddenColors.has(key)) {
-        data[i] = data[i + 1] = data[i + 2] = 0;
-        data[i + 3] = 0;
-        continue;
-      }
-
-      // Write quantized color
-      data[i] = nr; data[i + 1] = ng; data[i + 2] = nb;
-
-      // Alpha handling
-      if (a === 0) {
-        data[i + 3] = 0;
-      } else if (a < 255) {
-        data[i + 3] = transparentHideActive ? 0 : 255;
-      } else {
-        data[i + 3] = 255;
-      }
-
-      if (data[i + 3] !== 0) {
-        colorCounts[key] = (colorCounts[key] || 0) + 1;
-      }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-  }
-
-// --- keep processedCanvas/UI in sync right here ---
-processedCanvas = document.createElement('canvas');
-processedCtx = processedCanvas.getContext('2d', { willReadFrequently: true });
-processedCanvas.width  = canvas.width;
-processedCanvas.height = canvas.height;
-processedCtx.clearRect(0, 0, processedCanvas.width, processedCanvas.height);
-processedCtx.drawImage(canvas, 0, 0);
-
-// Final authoritative palette pass + export
-const exportCanvas = finalizeToPalette();
-downloadLink.href = exportCanvas.toDataURL('image/png');
-
-// Normalize filename to .png (handles svg/jpg/etc.)
-const base = (fileName || 'image').replace(/\.[^.]+$/,'').trim() || 'image';
-downloadLink.download = `converted_${base}.png`;
-
-showImageInfo(canvas.width, canvas.height);
-if (colorCounts) showColorUsage(colorCounts, getColorsListOrder());
-
-_colorCounts = colorCounts;
-
-return colorCounts;
-}
 
 let _lastAppliedScale = 1;
 (function wrapApplyScale(){
@@ -817,7 +1322,7 @@ function showColorUsage(colorCounts = {}, order = 'original') {
           updateMasterLabel();
           saveState();
           updatePadraoFromActiveButtons();
-          if (window.originalImage) {
+          if (originalImage) {
             reprocessWithCurrentPalette();
           }
         }, 0);
@@ -901,9 +1406,9 @@ function showColorUsage(colorCounts = {}, order = 'original') {
         updateMasterLabel();
         saveState();
         updatePadraoFromActiveButtons();
-        if (window.originalImage) {
-          reprocessWithCurrentPalette();
-        }
+        if (originalImage) {
+            reprocessWithCurrentPalette();
+          }
       });
     });
   })({
@@ -1193,62 +1698,87 @@ function applyScale() {
 // Core: zoom the processed image into the visible canvas
 function applyPreview() {
   const src = processedCanvas || canvas;
-  if (!src) { 
-    console.warn('No source for preview'); 
-    return; 
-  }
+  if (!src) return;
 
   let zoom = parseFloat(zoomRange?.value);
   if (!Number.isFinite(zoom) || zoom <= 0) zoom = 1;
-
-  // no longer clamp zoom to fit — let user zoom out freely
   const effectiveZoom = zoom;
 
   const vp = document.getElementById('canvasViewport');
   const baseW = src.width;
   const baseH = src.height;
 
-  // keep viewport center while zooming
-  let cx = 0.5, cy = 0.5;
-  if (vp && canvas.offsetWidth && canvas.offsetHeight) {
-    cx = (vp.scrollLeft + vp.clientWidth  / 2) / Math.max(1, canvas.offsetWidth);
-    cy = (vp.scrollTop  + vp.clientHeight / 2) / Math.max(1, canvas.offsetHeight);
+  // Capture current displayed canvas size to compute a stable center ratio
+  const prevDisplayW = canvas.offsetWidth || parseFloat(canvas.style.width) || baseW;
+  const prevDisplayH = canvas.offsetHeight || parseFloat(canvas.style.height) || baseH;
+
+  // Center ratios (where the viewport center falls inside the canvas)
+  let relCx = 0.5, relCy = 0.5;
+  if (vp && prevDisplayW && prevDisplayH) {
+    relCx = (vp.scrollLeft + vp.clientWidth / 2) / prevDisplayW;
+    relCy = (vp.scrollTop  + vp.clientHeight / 2) / prevDisplayH;
+    relCx = Math.min(Math.max(relCx, 0), 1);
+    relCy = Math.min(Math.max(relCy, 0), 1);
   }
 
-  // target draw size
-  let pw = Math.max(1, Math.round(baseW * effectiveZoom));
-  let ph = Math.max(1, Math.round(baseH * effectiveZoom));
+  const pw = Math.max(1, Math.round(baseW * effectiveZoom));
+  const ph = Math.max(1, Math.round(baseH * effectiveZoom));
 
-  // draw (crisp pixels)
-  canvas.width  = pw;
+  // draw into canvas (pixel crisp)
+  canvas.width = pw;
   canvas.height = ph;
   ctx.clearRect(0, 0, pw, ph);
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(src, 0, 0, baseW, baseH, 0, 0, pw, ph);
 
-  // element size so viewport can scroll/pan
-  canvas.style.width  = pw + 'px';
+  // make element match the drawn pixels so scroll/panning works
+  canvas.style.width = pw + 'px';
   canvas.style.height = ph + 'px';
 
   if (vp) {
-    const smallerThanViewport = pw <= vp.clientWidth && ph <= vp.clientHeight;
+    const fitsWidth  = pw <= vp.clientWidth;
+    const fitsHeight = ph <= vp.clientHeight;
 
-    if (smallerThanViewport) {
-      // center image if smaller than viewport
+    if (fitsWidth && fitsHeight) {
+      // If the image fits entirely, center it via grid centering
+      vp.style.display = 'grid';
+      vp.style.placeItems = 'center';
       vp.scrollLeft = 0;
       vp.scrollTop  = 0;
-      vp.style.display = 'grid';
-      vp.style.placeContent = 'center';
     } else {
-      // restore normal layout for panning
+      // Ensure viewport is scrollable and preserve/compute sensible offsets.
+      // If one axis fits, center along that axis and scroll on the other.
       vp.style.display = '';
-      vp.style.placeContent = '';
-      vp.scrollLeft = Math.max(0, canvas.offsetWidth  * cx - vp.clientWidth  / 2);
-      vp.scrollTop  = Math.max(0, canvas.offsetHeight * cy - vp.clientHeight / 2);
+      vp.style.placeItems = '';
+
+      if (fitsWidth && !fitsHeight) {
+        // Center horizontally while allowing vertical scroll.
+        vp.style.display = 'flex';
+        vp.style.justifyContent = 'center';
+        vp.style.alignItems = 'flex-start';
+        // horizontal center: position canvas in middle
+        vp.scrollLeft = 0; // when using flex+justify center, scrollLeft should be 0
+        // vertical scroll preserves center ratio
+        vp.scrollTop  = Math.max(0, Math.round(ph * relCy - vp.clientHeight / 2));
+      } else if (!fitsWidth && fitsHeight) {
+        // Center vertically while allowing horizontal scroll.
+        vp.style.display = 'flex';
+        vp.style.alignItems = 'center';
+        vp.style.justifyContent = 'flex-start';
+        vp.scrollTop = 0; // centered vertically via flex; no vertical scroll
+        vp.scrollLeft = Math.max(0, Math.round(pw * relCx - vp.clientWidth / 2));
+      } else {
+        // Both overflow: preserve center point
+        // revert any flex centering styles
+        vp.style.display = '';
+        vp.style.justifyContent = '';
+        vp.style.alignItems = '';
+        vp.scrollLeft = Math.max(0, Math.round(pw * relCx - vp.clientWidth / 2));
+        vp.scrollTop  = Math.max(0, Math.round(ph * relCy - vp.clientHeight / 2));
+      }
     }
   }
 
-  // update label
   zoomValue.textContent = effectiveZoom.toFixed(2) + 'x';
 }
 
@@ -1458,6 +1988,28 @@ function isDitheringOn() {
   return v === null ? false : v === 'true';   // default OFF
 }
 
+(function initDitherAlgorithmSelector() {
+  document.addEventListener('DOMContentLoaded', () => {
+    const select = document.getElementById('ditherAlgorithm');
+    if (!select) return;
+
+    // Load saved algorithm
+    const saved = getDitheringAlgorithm();
+    select.value = saved;
+
+    // Handle changes
+    select.addEventListener('change', () => {
+      setDitheringAlgorithm(select.value);
+      currentDithering = select.value;
+      
+      // Reprocess if image is loaded and dithering is ON
+      if (originalImage && isDitheringOn && isDitheringOn()) {
+        reprocessWithCurrentPalette();
+      }
+    });
+  });
+})();
+
 (function initDitherButton(){
   const btn = document.getElementById('ditherButton');
   if (!btn) return;
@@ -1476,6 +2028,7 @@ function isDitheringOn() {
     const next = !btn.classList.contains('active');
     btn.classList.toggle('active', next);
     localStorage.setItem(DITHER_KEY, String(next));
+    currentDithering = next ? getDitheringAlgorithm() : 'None';
 
     if (originalImage) {
       applyScale();
@@ -1693,4 +2246,141 @@ document.addEventListener("DOMContentLoaded", () => {
 
 document.addEventListener('DOMContentLoaded', () => {
   requestAnimationFrame(() => updatePadraoFromActiveButtons());
+});
+
+// Dithering algorithm change handler
+document.addEventListener('DOMContentLoaded', () => {
+  const select = document.getElementById('ditherAlgorithm');
+  if (!select) return;
+
+  // Load saved algorithm
+  const saved = localStorage.getItem('ditherAlgorithm') || 'floyd-steinberg';
+  select.value = saved;
+  currentDitherAlgorithm = getElementById('ditherAlgorithm');
+
+    // Handle changes
+    select.addEventListener('change', () => {
+      localStorage.setItem('ditherAlgorithm', select.value);
+
+      // Reprocess the image
+      if (originalImage) {
+        applyScale();
+        applyPreview();
+      }
+    });
+});
+
+// Make scale input work as number field
+(function enhanceScaleInput() {
+  const scaleInput = document.getElementById('scaleRange');
+  const scaleValue = document.getElementById('scaleValue');
+  
+  if (!scaleInput || !scaleValue) return;
+
+  scaleInput.addEventListener('input', () => {
+    const val = parseFloat(scaleInput.value) || 1;
+    scaleValue.textContent = val.toFixed(2) + 'x';
+  });
+
+  scaleInput.addEventListener('change', () => {
+    let val = parseFloat(scaleInput.value) || 1;
+    // Clamp to min/max
+    val = Math.max(0.001, Math.min(5, val));
+    scaleInput.value = val;
+    scaleValue.textContent = val.toFixed(2) + 'x';
+    currentScale = parseFloat(val);
+    
+    if (originalImage) {
+      applyScale();
+      applyPreview();
+    }
+  });
+})();
+
+
+(function initColorMatchingSelector() {
+  const methods = {
+    standard: corMaisProximaStandard,
+    lab: corMaisProximaLAB,
+    vibrant: corMaisProximaVibrant
+  };
+  
+  const select = document.getElementById('colorMatching');
+  if (!select) return;
+
+  // Load saved method
+  const saved = localStorage.getItem('colorMatching') || 'standard';
+  select.value = saved;
+
+  // Override the global function
+  window.corMaisProxima = methods[saved];
+
+  select.addEventListener('change', () => {
+    
+  localStorage.setItem('colorMatching', select.value);
+  window.corMaisProxima = methods[select.value];
+
+  if (originalImage) {
+    if (typeof reprocessWithCurrentPalette === 'function') reprocessWithCurrentPalette();
+    if (typeof processarImagem === 'function') processarImagem();
+  }
+});
+})();
+
+// Set up the dropdown change handler
+document.addEventListener('DOMContentLoaded', () => {
+  const methods = {
+    standard: corMaisProximaStandard,
+    lab: corMaisProximaLAB,
+    vibrant: corMaisProximaVibrant
+  };
+
+  const select = document.getElementById('colorMatching');
+  if (!select) return;
+
+  const saved = localStorage.getItem('colorMatching') || 'standard';
+  select.value = saved;
+
+  select.addEventListener('change', () => {
+    localStorage.setItem('colorMatching', select.value);
+    corMaisProxima = methods[select.value];
+    window.corMaisProxima = corMaisProxima;
+    currentColorAlgorithm = select.value;
+    
+    if (originalImage) {
+      reprocessWithCurrentPalette();
+      if (typeof processarImagem === 'function') processarImagem();
+    }
+  });
+});
+
+// Fallback: ensure any change to the visible `colorMatching` select updates the
+// active color-matching function and triggers reprocessing. This covers cases
+// where other initialization code may have attached different listeners.
+  document.addEventListener('change', (ev) => {
+  const t = ev && ev.target;
+  if (!t || t.id !== 'colorMatching') return;
+
+  const methods = {
+    standard: corMaisProximaStandard,
+    lab: corMaisProximaLAB,
+    vibrant: corMaisProximaVibrant
+  };
+
+  try {
+    const val = t.value || localStorage.getItem('colorMatching') || 'standard';
+    localStorage.setItem('colorMatching', val);
+    corMaisProxima = methods[val] || corMaisProximaStandard;
+    window.corMaisProxima = corMaisProxima;
+    currentColorAlgorithm = val;
+
+    if (originalImage) {
+      if (typeof reprocessWithCurrentPalette === 'function') {
+        reprocessWithCurrentPalette();
+      }
+      if (typeof processarImagem === 'function') processarImagem();
+    }
+  } catch (err) {
+    console.error('Error handling colorMatching change:', err);
+  }
 });

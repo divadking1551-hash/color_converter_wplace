@@ -1,11 +1,7 @@
 An adaptation that includes more functionality, mainly more dithering and color matching algorithms
-
 Made for local use, may be very CPU heavy
-
 Best (personal) match: Jarvis (Smooth) + Perceptual (Accurate)
-
 Made using Claude and VSCode Copilot, so stuff aint optimal
-
 TO RUN: just doubleclick the run.bat, will self-host it
 
 # WPlace Pixel Art Color Converter
